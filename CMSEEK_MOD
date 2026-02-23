@@ -1,0 +1,221 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+
+import sys
+
+if sys.version_info[0] < 3:
+    print("\nPython3 is needed to run CMSeeK, Try \"python3 cmseek.py\" instead\n")
+    sys.exit(2)
+
+import os
+import argparse
+import json
+import importlib
+
+import cmseekdb.basic as cmseek
+import cmseekdb.core as core
+import cmseekdb.createindex as createindex
+import ssl
+
+ssl._create_default_https_context = ssl._create_unverified_context
+
+parser = argparse.ArgumentParser(prog='cmseek.py', add_help=False)
+
+parser.add_argument('-h', '--help', action="store_true")
+parser.add_argument('-v', '--verbose', action="store_true")
+parser.add_argument("--version", action="store_true")
+parser.add_argument("--update", action="store_true")
+
+parser.add_argument('-r', "--random-agent", action="store_true")
+parser.add_argument('--user-agent')
+parser.add_argument('--googlebot', action="store_true")
+
+parser.add_argument('-u', '--url')
+parser.add_argument('-l', '--list')
+
+# ⭐ NUEVO — archivo batch
+parser.add_argument('-f', '--file', help='File containing domains list')
+
+parser.add_argument('--clear-result', action='store_true')
+parser.add_argument('--follow-redirect', action='store_true')
+parser.add_argument('--no-redirect', action='store_true')
+parser.add_argument('--batch', action="store_true")
+parser.add_argument('-i', '--ignore-cms')
+parser.add_argument('--strict-cms')
+parser.add_argument('--skip-scanned', action="store_true")
+parser.add_argument('--light-scan', action="store_true")
+parser.add_argument('-o', '--only-cms', action="store_true")
+
+args = parser.parse_args()
+
+if args.clear_result:
+    cmseek.clear_log()
+
+if args.help:
+    cmseek.help()
+
+if args.light_scan:
+    cmseek.light_scan = True
+
+if args.only_cms:
+    cmseek.only_cms = True
+
+if args.verbose:
+    cmseek.verbose = True
+
+if args.skip_scanned:
+    cmseek.skip_scanned = True
+
+if args.follow_redirect:
+    cmseek.redirect_conf = '1'
+
+if args.no_redirect:
+    cmseek.redirect_conf = '2'
+
+if args.update:
+    cmseek.update()
+
+if args.batch:
+    cmseek.batch_mode = True
+
+if args.version:
+    print('\n\n')
+    cmseek.info("CMSeeK Version: " + cmseek.cmseek_version)
+    cmseek.bye()
+
+if args.ignore_cms:
+    cmseek.ignore_cms = args.ignore_cms.split(',')
+    for acms in cmseek.ignore_cms:
+        cmseek.warning('Ignoring CMS: ' + acms)
+
+if args.strict_cms:
+    cmseek.strict_cms = args.strict_cms.split(',')
+    cmseek.warning('Checking target against CMSes: ' + args.strict_cms)
+
+# User agent selection
+if args.user_agent is not None:
+    cua = args.user_agent
+elif args.random_agent is not None:
+    cua = cmseek.randomua('random')
+else:
+    cua = None
+
+if args.googlebot:
+    cua = 'Googlebot/2.1 (+http://www.google.com/bot.html)'
+
+# Update report index
+index_status = createindex.init(cmseek.access_directory)
+
+if index_status[0] != '1':
+    if not cmseek.batch_mode:
+        input('There was an error while creating result index! Press ENTER to continue:')
+
+############################################
+# ⭐ SINGLE URL SCAN
+############################################
+
+if args.url is not None:
+    s = args.url
+    target = cmseek.process_url(s)
+
+    if target != '0':
+        if cua is None:
+            cua = cmseek.randomua()
+
+        core.main_proc(target, cua)
+        cmseek.handle_quit()
+
+############################################
+# ⭐ LIST SCAN (OLD OPTION)
+############################################
+
+elif args.list is not None:
+    sites = args.list
+    cmseek.clearscreen()
+    cmseek.banner("CMS Detection And Deep Scan")
+
+    sites_list = []
+
+    try:
+        with open(sites, 'r') as ot:
+            file_contents = ot.read()
+
+            if "," in file_contents:
+                file_contents = file_contents.replace('\n', '')
+                sites_list = file_contents.split(',')
+            else:
+                sites_list = file_contents.splitlines()
+
+    except FileNotFoundError:
+        cmseek.error('Invalid path! CMSeeK is quitting')
+        cmseek.bye()
+
+    if sites_list != []:
+
+        if cua is None:
+            cua = cmseek.randomua()
+
+        for s in sites_list:
+
+            s = s.replace(' ', '')
+            target = cmseek.process_url(s)
+
+            if target != '0':
+                core.main_proc(target, cua)
+                cmseek.handle_quit(False)
+
+            else:
+                cmseek.warning('Invalid URL: ' + s)
+
+        cmseek.result('Finished scanning all targets.', '')
+
+    else:
+        cmseek.error("No url provided")
+        cmseek.bye()
+
+############################################
+# ⭐ NUEVO — FILE BATCH SCAN (TU REQUERIMIENTO)
+############################################
+
+elif args.file is not None:
+
+    try:
+        with open(args.file, 'r') as f:
+            targets = f.read().splitlines()
+
+        if cua is None:
+            cua = cmseek.randomua()
+
+        cmseek.clearscreen()
+        cmseek.banner("Batch CMS Detection Scan")
+
+        for domain in targets:
+
+            domain = domain.strip()
+
+            if domain == "":
+                continue
+
+            target = cmseek.process_url(domain)
+
+            if target != '0':
+
+                print("\n[+] Scanning:", domain)
+
+                core.main_proc(target, cua)
+                cmseek.handle_quit(False)
+
+            else:
+                cmseek.warning("Invalid URL: " + domain)
+
+        cmseek.result("Finished scanning all targets.", '')
+
+    except FileNotFoundError:
+        cmseek.error("Input file not found!")
+        cmseek.bye()
+
+############################################
+
+else:
+    cmseek.error("Invalid Input!")
+    cmseek.bye()
